@@ -2,7 +2,7 @@
 # 05-fix-kernel-grub.sh
 # 把 GRUB 默认启动项固定到"装了 NVIDIA DKMS 的最新 6.8 内核"
 # 适用于：你电脑里有 5.15 / 5.16 / 6.8.110 / 6.8.111 等多个内核，
-#         但只有 6.8 系列才支持 RTX 5070（Blackwell, Driver 580+）
+#         但只有 6.8 系列才支持 RTX 5070 Ti（Blackwell, Driver 580+）
 # 安全：会先备份 /etc/default/grub 到 /etc/default/grub.bak.<时间戳>
 
 set -e

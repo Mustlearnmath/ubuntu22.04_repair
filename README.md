@@ -1,6 +1,6 @@
 # ubuntu22.04_repair
 
-Ubuntu 22.04 + NVIDIA RTX 5070 + CUDA 13 + ROS Humble + Isaac Sim 图形会话启动失败的修复工具集。
+Ubuntu 22.04 + NVIDIA RTX 5070 Ti + CUDA 13 + ROS Humble + Isaac Sim 图形会话启动失败的修复工具集。
 
 > 适用场景：装搜狗输入法 / 升级 CUDA 后，登录界面提示 **"启动会话失败"** 或卡在 Ubuntu Logo；TTY 无法登录；新建用户也失败 → 系统级桌面依赖被 `apt autoremove` 误删。
 
@@ -8,7 +8,7 @@ Ubuntu 22.04 + NVIDIA RTX 5070 + CUDA 13 + ROS Humble + Isaac Sim 图形会话�
 
 ## 🚨 内核选择（请先看这里）
 
-你的硬件是 **RTX 5070（Blackwell 架构）**，必须用 NVIDIA 580+ 驱动。这要求内核 **≥ 6.8**。
+你的硬件是 **RTX 5070 Ti（Blackwell 架构）**，必须用 NVIDIA 580+ 驱动。这要求内核 **≥ 6.8**。
 **不要按某些旧教程把内核固定回 5.15** —— 5.15 装不上你现在的 NVIDIA DKMS 模块，会黑屏。
 
 **本仓库推荐固定启动内核：你机器上最新的 `6.8.x`（脚本会自动挑 DKMS 已成功编译 nvidia 模块的那一个）**。

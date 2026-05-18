@@ -1,6 +1,6 @@
 #!/bin/bash
 # 02-repair.sh
-# 对症修复 Ubuntu 22.04 + NVIDIA RTX 5070 桌面会话启动失败
+# 对症修复 Ubuntu 22.04 + NVIDIA RTX 5070 Ti 桌面会话启动失败
 # 处理：
 #   - apt autoremove 误删的 GNOME/Ubuntu Desktop 依赖
 #   - fcitx / ibus / 搜狗输入法残留钩子
