@@ -24,7 +24,7 @@ set -u
 
 [ "$(id -u)" -eq 0 ] || { echo "[!] Run as root."; exit 1; }
 
-SSID="${1:-CS-5G-wifi}"
+SSID="${1:-CS-2-5G}"
 PASS="${2:-12345678}"
 KEEP_ETH=0
 for a in "$@"; do
@@ -41,6 +41,13 @@ ok()   { echo "[+] $*"; }
 if findmnt -no OPTIONS / 2>/dev/null | grep -qE '(^|,)ro(,|$)'; then
   say "Root filesystem is read-only, remounting rw ..."
   mount -o remount,rw / 2>&1 || warn "remount failed, try manually: mount -o remount,rw /"
+fi
+
+# --- 0.1 self-heal root dir permission (accidental `chmod 666 /` breaks gdm) ---
+ROOTMODE=$(stat -c '%a' / 2>/dev/null)
+if [ "$ROOTMODE" != "755" ]; then
+  warn "Root dir '/' is $ROOTMODE (should be 755). Fixing ..."
+  chmod 755 / 2>&1 && ok "  / = $(stat -c '%a' /)"
 fi
 
 # --- 0.5 handle wired Ethernet ---
@@ -112,7 +119,24 @@ fi
 # --- 5. write config and connect ---
 CONF=/tmp/wpa_supplicant.conf
 mkdir -p /run/wpa_supplicant
-cat > "$CONF" <<EOF
+
+# prefer wpa_passphrase (robust quoting); fall back to manual heredoc
+if command -v wpa_passphrase >/dev/null 2>&1; then
+  wpa_passphrase "$SSID" "$PASS" > "$CONF" 2>/dev/null || {
+    warn "wpa_passphrase failed (SSID too short?), writing manual config"
+    cat > "$CONF" <<EOF
+network={
+    ssid="$SSID"
+    psk="$PASS"
+    key_mgmt=WPA-PSK
+    scan_ssid=1
+}
+EOF
+  }
+  # add useful control interface + scan_ssid for hidden SSIDs
+  sed -i '1i ctrl_interface=DIR=/run/wpa_supplicant GROUP=root' "$CONF" 2>/dev/null || true
+else
+  cat > "$CONF" <<EOF
 ctrl_interface=DIR=/run/wpa_supplicant GROUP=root
 update_config=1
 network={
@@ -122,6 +146,7 @@ network={
     scan_ssid=1
 }
 EOF
+fi
 chmod 600 "$CONF"
 
 # kill any stale instances from previous attempts
