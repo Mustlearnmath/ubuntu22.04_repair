@@ -1,6 +1,6 @@
 #!/bin/bash
 # 02-repair.sh
-# 对症修复 Ubuntu 22.04 + NVIDIA RTX 5070 Ti 桌面会话启动失败
+# 对症修复 Ubuntu 22.04 + NVIDIA RTX 5070 桌面会话启动失败
 # 处理：
 #   - apt autoremove 误删的 GNOME/Ubuntu Desktop 依赖
 #   - fcitx / ibus / 搜狗输入法残留钩子
@@ -20,13 +20,26 @@ LOG=/root/repair-"$TS".log
 exec > >(tee -a "$LOG") 2>&1
 
 step() { echo; echo "########## $* ##########"; }
-backup() { [ -e "$1" ] && cp -a "$1" "$1.bak.$TS" && echo "已备份: $1 -> $1.bak.$TS"; }
+backup() { [ -e "$1" ] && cp -a "$1" "$1.bak.$TS" && echo "[backup] $1 -> $1.bak.$TS"; }
 
-step "0. 网络自检"
-if ! ping -c 1 -W 3 archive.ubuntu.com >/dev/null 2>&1 \
-   && ! ping -c 1 -W 3 mirrors.aliyun.com >/dev/null 2>&1; then
-  echo "!! 网络不通。请回 Recovery 菜单选 Enable networking，再试。"
-  exit 2
+step "0. Network self-check"
+# Force IPv4 (-4) to avoid the AAAA/dual-stack timeout trap that makes
+# `ping domain` fail even though the network is actually alive.
+# NET=1 -> can reach apt repos (full mode)
+# NET=0 -> no apt access -> LOCAL-ONLY mode (skip all download steps)
+NET=0
+if ping -4 -c1 -W3 archive.ubuntu.com >/dev/null 2>&1 \
+   || ping -4 -c1 -W3 mirrors.aliyun.com >/dev/null 2>&1; then
+  NET=1
+  echo "[net] apt repo reachable -> FULL mode"
+elif ping -4 -c1 -W3 8.8.8.8 >/dev/null 2>&1 \
+   || ping -4 -c1 -W3 223.5.5.5 >/dev/null 2>&1; then
+  NET=0
+  echo "[net] Internet OK (8.8.8.8 reachable) but apt repo NOT reachable"
+  echo "[net] -> LOCAL-ONLY mode: download steps skipped, local fixes still run"
+else
+  NET=0
+  echo "[net] No network -> LOCAL-ONLY mode: download steps skipped, local fixes still run"
 fi
 
 step "1. 备份 /etc 关键文件"
@@ -38,12 +51,20 @@ cp -a /etc/X11/Xsession.d /root/repair-backup-"$TS"/ 2>/dev/null || true
 cp -a /etc/X11/default-display-manager /root/repair-backup-"$TS"/ 2>/dev/null || true
 echo "备份目录: /root/repair-backup-$TS"
 
-step "2. 修 dpkg 半装状态"
+step "2. Fix dpkg half-configured state"
 dpkg --configure -a || true
-apt -y --fix-broken install || true
+if [ "$NET" = 1 ]; then
+  apt -y --fix-broken install || true
+else
+  echo "[skip] apt --fix-broken install (may download; dpkg --configure -a already done locally)"
+fi
 
 step "3. apt update"
-apt update
+if [ "$NET" = 1 ]; then
+  apt update
+else
+  echo "[skip] apt update (no network; run 'bash 02-repair.sh' again after connecting)"
+fi
 
 step "4. 补装核心桌面 / X11 / 会话依赖（精确包名）"
 # NVIDIA 的 Xorg 驱动包名带版本号（如 xserver-xorg-video-nvidia-580），
@@ -99,10 +120,14 @@ for p in "${CORE_PKGS[@]}"; do
   if apt-cache show "$p" >/dev/null 2>&1; then
     AVAIL_PKGS+=( "$p" )
   else
-    echo "  (跳过本机源里没有的包: $p)"
+    echo "  (skip package not in local repo: $p)"
   fi
 done
-apt install -y --no-install-recommends "${AVAIL_PKGS[@]}" || true
+if [ "$NET" = 1 ]; then
+  apt install -y --no-install-recommends "${AVAIL_PKGS[@]}" || true
+else
+  echo "[skip] apt install desktop packages (no network; run 'bash 02-repair.sh' again after connecting)"
+fi
 
 # 再 reinstall 一遍保证文件齐（图标主题一定要 reinstall，否则 index.theme 缺失会大面积丢图标）
 REINSTALL_PKGS=(
@@ -113,7 +138,11 @@ REINSTALL_OK=()
 for p in "${REINSTALL_PKGS[@]}"; do
   apt-cache show "$p" >/dev/null 2>&1 && REINSTALL_OK+=( "$p" )
 done
-apt install --reinstall -y "${REINSTALL_OK[@]}" || true
+if [ "$NET" = 1 ]; then
+  apt install --reinstall -y "${REINSTALL_OK[@]}" || true
+else
+  echo "[skip] apt reinstall packages (no network)"
+fi
 # 重建系统图标缓存
 command -v gtk-update-icon-cache >/dev/null 2>&1 && \
   for t in /usr/share/icons/*; do
@@ -125,13 +154,21 @@ for i in /usr/share/icons/hicolor/index.theme /usr/share/icons/Adwaita/index.the
 done
 
 step "5. ubuntu-desktop 元包（防止还有遗漏）"
-apt install -y ubuntu-desktop-minimal || true
+if [ "$NET" = 1 ]; then
+  apt install -y ubuntu-desktop-minimal || true
+else
+  echo "[skip] apt install ubuntu-desktop-minimal (no network)"
+fi
 
 step "6. 清理 fcitx / ibus / 搜狗 残留钩子"
-# 删二进制包
-apt purge -y 'fcitx*' 'sogou*' 2>/dev/null || true
-# ibus 不删（它是 GNOME 默认），但要确保是干净的
-apt install --reinstall -y ibus ibus-gtk ibus-gtk3 || true
+# 删二进制包（下载类，无网络跳过；下面的残留钩子清理是本地操作，照常做）
+if [ "$NET" = 1 ]; then
+  apt purge -y 'fcitx*' 'sogou*' 2>/dev/null || true
+  # ibus 不删（它是 GNOME 默认），但要确保是干净的
+  apt install --reinstall -y ibus ibus-gtk ibus-gtk3 || true
+else
+  echo "[skip] apt purge/reinstall fcitx/ibus packages (no network; leftover hook files still cleaned below)"
+fi
 
 # 清 X session 注入文件
 for f in /etc/X11/Xsession.d/*fcitx* /etc/X11/Xsession.d/*sogou* \
@@ -189,8 +226,12 @@ fi
 step "8. 修 xsessions 会话文件"
 # 强制使用 X11 版 ubuntu 会话
 if [ ! -f /usr/share/xsessions/ubuntu.desktop ]; then
-  echo "ubuntu.desktop 缺失，重装 ubuntu-session"
-  apt install --reinstall -y ubuntu-session
+  if [ "$NET" = 1 ]; then
+    echo "ubuntu.desktop 缺失，重装 ubuntu-session"
+    apt install --reinstall -y ubuntu-session
+  else
+    echo "[skip] ubuntu.desktop missing but no network to reinstall ubuntu-session"
+  fi
 fi
 # 看 Exec 是否指向真实文件
 for f in /usr/share/xsessions/*.desktop; do
@@ -198,7 +239,11 @@ for f in /usr/share/xsessions/*.desktop; do
   if [ -n "$ex" ] && [ ! -x "$ex" ]; then
     echo "!! $f 的 Exec=$ex 不可执行，尝试 reinstall 提供它的包"
     pkg=$(dpkg -S "$ex" 2>/dev/null | cut -d: -f1 | head -1)
-    [ -n "$pkg" ] && apt install --reinstall -y "$pkg"
+    if [ "$NET" = 1 ]; then
+      [ -n "$pkg" ] && apt install --reinstall -y "$pkg"
+    else
+      echo "  [skip] reinstall $pkg (no network; rerun after connecting)"
+    fi
   fi
 done
 chmod 644 /usr/share/xsessions/*.desktop 2>/dev/null
@@ -214,11 +259,19 @@ fi
 echo "检测到 NVIDIA 源码版本: ${NV_VER:-未知}"
 
 # 给所有 6.8 内核都装 headers，再 autoinstall
-for k in $(ls /boot/vmlinuz-* | sed 's|/boot/vmlinuz-||' | grep -E '^6\.8'); do
-  apt install -y "linux-headers-$k" 2>/dev/null || true
-done
+if [ "$NET" = 1 ]; then
+  for k in $(ls /boot/vmlinuz-* | sed 's|/boot/vmlinuz-||' | grep -E '^6\.8'); do
+    apt install -y "linux-headers-$k" 2>/dev/null || true
+  done
+else
+  echo "[skip] installing linux-headers (no network; dkms below skipped where headers missing)"
+fi
 if [ -n "$NV_VER" ]; then
   for k in $(ls /boot/vmlinuz-* | sed 's|/boot/vmlinuz-||' | grep -E '^6\.8'); do
+    if [ "$NET" != 1 ] && [ ! -d "/usr/src/linux-headers-$k" ]; then
+      echo "  [skip] dkms for $k (no headers and no network)"
+      continue
+    fi
     dkms install -m nvidia -v "$NV_VER" -k "$k" --force 2>&1 | tail -10 || true
   done
 fi

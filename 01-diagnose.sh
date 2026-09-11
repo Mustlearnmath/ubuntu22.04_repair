@@ -243,8 +243,14 @@ echo
 echo "/var/log 占用:"
 du -sh /var/log 2>/dev/null
 echo
-echo "journal 自检:"
-journalctl --verify --no-pager 2>&1 | tail -5
+echo "journal self-check (verifying each file in /var/log/journal, can be slow with large journals; max 90s then auto-skip):"
+timeout 90 journalctl --verify --no-pager 2>&1
+rc=$?
+if [ "$rc" = "124" ]; then
+  echo "(journalctl --verify exceeded 90s and was skipped -- normal when journal is large, does not affect repair)"
+elif [ "$rc" != "0" ]; then
+  echo "(journalctl --verify exit code $rc -- possible corruption, see details above)"
+fi
 
 hr "22. 图标主题 / 会话缓存（图标丢失问题相关）"
 ls -d /usr/share/icons/hicolor /usr/share/icons/Adwaita /usr/share/icons/Yaru 2>/dev/null

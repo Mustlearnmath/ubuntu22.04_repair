@@ -121,7 +121,7 @@ echo "已写入 $(wc -l < "$SNAP") 行"
 
 step "2. 收集 /root 下的报告与日志"
 COUNT=0
-for pat in /root/diagnosis.txt /root/env-check.txt /root/reinstall-ros.sh \
+for pat in /root/diagnosis.txt /root/evidence.txt /root/env-check.txt /root/reinstall-ros.sh \
            /root/repair-*.log /root/fix-tty-login-*.log /root/fallback-xfce-*.log; do
   for f in $pat; do
     [ -f "$f" ] || continue

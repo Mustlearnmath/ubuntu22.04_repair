@@ -45,12 +45,15 @@ if findmnt -no OPTIONS / 2>/dev/null | grep -qE '(^|,)ro(,|$)'; then
 fi
 
 NET=0
-if ping -c1 -W3 archive.ubuntu.com >/dev/null 2>&1 || ping -c1 -W3 mirrors.aliyun.com >/dev/null 2>&1; then
+if ping -4 -c1 -W3 archive.ubuntu.com >/dev/null 2>&1 || ping -4 -c1 -W3 mirrors.aliyun.com >/dev/null 2>&1; then
   NET=1
-  echo "网络: 可用"
+  echo "Network: OK (apt repo reachable)"
+elif ping -4 -c1 -W3 8.8.8.8 >/dev/null 2>&1 || ping -4 -c1 -W3 223.5.5.5 >/dev/null 2>&1; then
+  echo "Network: Internet OK but apt repo unreachable (DNS/dual-stack issue)"
+  echo "  -> local-only repair will run; download steps skipped"
 else
-  echo "网络: 不可用"
-  echo "  -> 若要补装桌面依赖，请回 Recovery 菜单先选『network / Enable networking』再重跑本脚本"
+  echo "Network: unavailable"
+  echo "  -> run 'bash 11-connect-wifi.sh' to join WiFi first, or select network in Recovery"
 fi
 
 banner "1. 诊断（只读，产物 /root/diagnosis.txt）"
@@ -68,14 +71,16 @@ bash 07-fix-tty-and-login.sh || true
 banner "3. 固定可用的 6.8 内核为 GRUB 默认项"
 bash 05-fix-kernel-grub.sh || true
 
-banner "4. 桌面依赖 / 图标主题 / X11 修复"
+banner "4. Desktop deps / icon theme / X11 repair"
 if [ "$RUN_DESKTOP" = 0 ]; then
-  echo "（--no-desktop，跳过）"
-elif [ "$NET" = 1 ]; then
-  bash 02-repair.sh || true
+  echo "(--no-desktop, skipped)"
 else
-  echo "跳过：没有网络。联网后单独执行: bash 02-repair.sh"
-  echo "（或者在 Recovery 菜单里选 network 后重跑: bash 00-run-all.sh）"
+  # Always run 02: it detects network itself and falls back to LOCAL-ONLY mode
+  bash 02-repair.sh || true
+  if [ "$NET" != 1 ]; then
+    echo
+    echo "(02 ran in LOCAL-ONLY mode; after connecting, run 'bash 02-repair.sh' again to finish downloads)"
+  fi
 fi
 
 banner "完成"
