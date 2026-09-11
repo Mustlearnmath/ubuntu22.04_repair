@@ -8,39 +8,107 @@ Ubuntu 22.04 + NVIDIA RTX 5070 Ti + CUDA 13 + ROS Humble + Isaac Sim 图形会�
 
 ---
 
-## ⚡ 三步速查（马上要关机换系统？只看这一段就够）
+## 🔥 一、现在就照着做（TL;DR · 完整可粘贴）
 
-> 这份 README 可以在故障机的 root shell 里直接看（不用浏览器）：
-> `cd /root/ubuntu22.04_repair && less README.md`　（`q` 退出，`/` 搜索，空格翻页）
+> 这份 README 能在故障机 root shell 里直接看（不用浏览器）：`cd /root/ubuntu22.04_repair && less README.md`（`q` 退出、`/关键词` 搜索、空格翻页）
 
-**第 1 步 · 进 GRUB**
-开机时**连按 `Esc`**（UEFI）或**长按 `Shift`**（老 BIOS）→ 选 `Advanced options for Ubuntu` → 选带 **`(recovery mode)`** 的 **6.8** 内核。
+**① 进 GRUB** —— 开机**连按 `Esc`**（UEFI）或**长按 `Shift`**（老 BIOS）→ 选 `Advanced options for Ubuntu` → 选带 **`(recovery mode)`** 的 **6.8** 内核。
 
-**第 2 步 · 进 root shell**
-在 **Recovery Menu**（蓝底）里：
-先选 `network`（**Enable networking**，回车，等它显示 Finished 再回车）→ 再选 `root`（**Drop to root shell prompt**）→ 出现 `root@主机名:~#`。
+**② 进 root shell** —— Recovery Menu（蓝底）里先选 `network`（**Enable networking**，回车，等它显示 Finished 再回车）→ 再选 `root`（**Drop to root shell prompt**）→ 出现 `root@主机名:~#`。
 
-**第 3 步 · 粘贴这几行**
+**③ 整段粘贴**（下面已含"更新旧副本"的写法，**逐行都别漏**）：
 
 ```bash
-mount -o remount,rw /      # 根分区默认只读，必须做
-ping -c 2 github.com       # 确认网络通
-cd /root
-git clone https://github.com/Mustlearnmath/ubuntu22.04_repair.git
-cd ubuntu22.04_repair
-bash 00-run-all.sh         # 一键：诊断 + 修 /dev/tty* + 修登录/日志服务 + 修内核 + 修桌面
-reboot
+mount -o remount,rw /                      # ① 让根分区可写（缺这行 git 会报只读错误）
+ping -c 2 github.com                       # ② 确认真的联网了
+
+cd /root/ubuntu22.04_repair                # ③ 进旧副本（cd 失败就先 ls /root 看目录名）
+git fetch origin && git reset --hard origin/main
+git log --oneline -1                       # 期望看到 a4adc73（或更新）
+chmod +x *.sh
+ls -l 00-run-all.sh 07-fix-tty-and-login.sh   # 这两个文件必须出现
+
+bash 00-run-all.sh                         # ④ 一键修复：诊断 + tty 权限 + 登录/日志服务 + 内核 + 桌面
+reboot                                     # ⑤ 重启
 ```
 
-> 如果 `git clone` 报 `destination path already exists`（以前克隆过），改成：
+> 🔁 **第一次拉（从没 clone 过）** 就用这个：
 > ```bash
-> cd /root/ubuntu22.04_repair && git fetch origin && git reset --hard origin/main
+> mount -o remount,rw / && ping -c 2 github.com
+> cd /root
+> git clone https://github.com/Mustlearnmath/ubuntu22.04_repair.git
+> cd ubuntu22.04_repair
+> bash 00-run-all.sh
+> reboot
 > ```
 
-**预期结果**：重启后出现登录界面 → 能进桌面、图标回来。
-若没有 → 跑 `bash 03-fallback-xfce.sh` 再 `reboot`；还不行 → 按文末「📤 把证据带回来」操作。
+**预期**：重启后出现登录界面 → 能进桌面、图标回来。
+**没修好**：`bash 03-fallback-xfce.sh && reboot`；还是不行 → 做下面的「三、把证据推上去」，我远程看。
 
-**时间预算**（全程**不要断电**）：诊断 1~3 分钟；修 `/dev` 权限与登录服务 10 秒；固定内核 20 秒；补桌面依赖 3~15 分钟（看网速）。
+**时间预算**（全程**不要断电**）：诊断 1~3 分钟；修 `/dev` 权限与登录服务 ~10 秒；固定内核 ~20 秒；补桌面依赖 3~15 分钟（看网速）。
+
+---
+
+## 📦 二、哪些东西会自动记录（你不用手动存）
+
+**是自动记录的** —— 跑 `00-run-all.sh` 的过程中日志会自己落到 `/root/`，不用你抄屏：
+
+| 文件 | 谁写的 | 内容 |
+|---|---|---|
+| `/root/diagnosis.txt` | `01-diagnose.sh`（只读） | **最全的证据**，23 节：系统/内核、NVIDIA/DKMS、xsessions、GDM/LightDM 日志、apt 卸载史、**`/dev` 挂载类型与 tty 权限**、failed/masked 单元、logind/journald/dbus 日志、**上一次启动（`-b -1`）的错误**、journal 目录权限、图标主题 |
+| `/root/fix-tty-login-<时间戳>.log` | `07-fix-tty-and-login.sh` | `/dev/tty*` **改前/改后权限**、哪些单元被 mask/修复、启动它们时的**真实报错**、journal 权限、图标主题检查 |
+| `/root/repair-<时间戳>.log` | `02-repair.sh` | 补包 / 去 fcitx 钩子 / 禁 Wayland / 重建 DKMS 的全过程 |
+| `/root/fallback-xfce-<时间戳>.log` | `03-fallback-xfce.sh` | 装 XFCE 的过程 |
+| `/root/env-check.txt` | `06-check-cuda-torch-isaacsim.sh` | 显卡 / CUDA / torch / Isaac Sim / ROS 体检 |
+| `/root/reinstall-ros.sh` | `04-list-missing-ros.sh` | 被误删的 ROS 包清单（可直接执行的脚本） |
+| `/root/repair-backup-<时间戳>/` | `02-repair.sh` | **改动前的配置备份**（grub / gdm3 / lightdm / Xsession.d / AccountsService），想回滚就用它 |
+
+**"要带回来的东西"就是上面这些文件。** 不想用脚本推送、只想手抄三行也行：
+
+```bash
+tail -80 /root/diagnosis.txt
+journalctl -b -1 -p err --no-pager | tail -80
+systemctl --failed --no-pager
+```
+
+---
+
+## 📤 三、一键把证据推回 GitHub（我直接在线看）
+
+```bash
+cd /root/ubuntu22.04_repair
+sudo bash 08-push-logs.sh
+```
+
+它会自动做四件事：
+1. 现场再抓一份**快照**（失败单元 / `/dev` 权限 / logind+journald+dbus 日志 / **上一次启动的错误** / gdm3 / Xorg / 图标主题 / DKMS+nvidia-smi / GRUB 默认项 / 磁盘）
+2. 收集 `/root` 下上表里的**所有报告与日志**（含 `bash_history`）
+3. 放进仓库 `logs/<主机名>-<时间戳>/`，提交并推送到 `origin main`
+4. 打印在线查看地址（手机也能开）
+
+**需要 GitHub 通行证（PAT）** —— GitHub 早已不支持密码推送：
+- 生成：<https://github.com/settings/tokens?type=beta> → 选仓库 `Mustlearnmath/ubuntu22.04_repair`，权限 **Contents: Read and write**
+- 运行时它会用**不回显**的方式让你粘贴 token（**不会**写进 `.git/config`、**不会**写进仓库文件，用完即销毁）
+- 免交互写法：
+  ```bash
+  GH_USER=Mustlearnmath GH_TOKEN=github_pat_xxx sudo -E bash 08-push-logs.sh
+  ```
+- 推完执行 `history -c` 清掉终端历史里的 token
+- **推不动就先别纠结**：日志已落在本地 `logs/<...>/`，可以拷 U 盘，或等系统能进桌面后再跑一次这个脚本
+
+---
+
+## 🆘 四、常见卡点速查
+
+| 现象 | 处理 |
+|---|---|
+| `cd: no such file or directory` | `ls /root` 看真实目录名再 `cd`（可能叫 `ubuntu22.04_repair-main`） |
+| `git fetch` 报 `not a git repository` | 旧目录不是 git 仓库（当初下的是 zip）→ `cd /root && rm -rf ubuntu22.04_repair && git clone https://github.com/Mustlearnmath/ubuntu22.04_repair.git` |
+| `git fetch` 超时 / `Could not connect to github.com` | 插**网线**重试；`echo 'nameserver 223.5.5.5' > /etc/resolv.conf`；多试几次。实在不行走 zip：网页 **Code → Download ZIP** → U 盘 → 拷进 `/root` 解压 → `cd ubuntu22.04_repair-main && chmod +x *.sh && bash 00-run-all.sh` |
+| `Read-only file system` | 漏了 `mount -o remount,rw /` |
+| `bash: $'\r': command not found` | 本仓库已强制 LF 并逐字节验证过，正常不会出现；万一出现：`sed -i 's/\r$//' *.sh` |
+| 脚本半天没反应 | 正常（`01`/`02` 输出多、补包慢），**别断电** |
+| Recovery 里进不去图形界面 | 正常，Recovery 只有文本 shell；改完必须 `reboot` 正常启动才会出现登录界面 |
 
 ---
 
@@ -200,6 +268,7 @@ Recovery 进 root shell 后，跑 [05-fix-kernel-grub.sh](05-fix-kernel-grub.sh)
 | 5 | [04-list-missing-ros.sh](04-list-missing-ros.sh) | 从 apt history 还原被误删的 ROS 包清单 | ❌ 只生成清单 |
 | 6 | [06-check-cuda-torch-isaacsim.sh](06-check-cuda-torch-isaacsim.sh) | 核对 CUDA / torch / Isaac Sim 是否完好 | ❌ 只读 |
 | 7 | [99-backup-home.sh](99-backup-home.sh) | 备份 /home、conda、ros workspace | ❌ 只读外挂 |
+| 收证据 | [08-push-logs.sh](08-push-logs.sh) | 抓现场快照 + 收集 `/root` 下所有报告日志，推送到 `logs/<主机名>-<时间戳>/` | ✅ 只加日志、推远程 |
 | 兜底 | [03-fallback-xfce.sh](03-fallback-xfce.sh) | GNOME 修不好就装 XFCE 进桌面 | ✅ 装新桌面 |
 
 
@@ -396,6 +465,13 @@ reboot
 ### `99-backup-home.sh` — 大手术前备份
 `bash 99-backup-home.sh /mnt/usb`（先把 U 盘挂到 `/mnt/usb`）。备份 `/home`（排除 `.cache`/Trash/Downloads）、`/root`、`/etc`、dpkg 包清单、apt 日志、NVIDIA/CUDA 清单。
 
+### `08-push-logs.sh` — 一键把证据推回仓库
+- **联网**：需要（推 GitHub）　**改系统**：只在仓库里新增 `logs/<主机名>-<时间戳>/`
+- **做的事**：抓现场快照（failed 单元 / `/dev` 权限 / logind+journald+dbus 日志 / `-b -1` 错误 / gdm3 / Xorg / 图标主题 / DKMS+nvidia-smi / GRUB / 磁盘）→ 收 `/root` 下所有报告与日志 + `bash_history` → `git pull --rebase` 对齐 → commit → **用 PAT 推送**
+- **参数/环境变量**：`GH_USER`、`GH_TOKEN`（不给就交互式问，输入不回显）
+- **安全**：token 只通过临时 `GIT_ASKPASS` 一次性交给 git，不写进 `.git/config` 也不进仓库文件；用完删临时文件，并提示 `history -c`
+- **产物**：`logs/<主机名>-<时间戳>/{snapshot.txt, diagnosis.txt, fix-tty-login-*.log, repair-*.log, ...}` + 在线查看链接
+
 ---
 
 ## ✅ 修好后怎么验证（重启进桌面后跑）
@@ -436,6 +512,8 @@ findmnt -no FSTYPE /dev                   # 期望 devtmpfs
 ---
 
 ## 📤 把证据带回来（给我，或给未来的你）
+
+> ⭐ **最省事：`cd /root/ubuntu22.04_repair && sudo bash 08-push-logs.sh`** —— 自动收齐下面所有内容并推回仓库（见前面「📤 三、」）。下面是手工方式。
 
 **A. 先在本机看**
 ```bash
