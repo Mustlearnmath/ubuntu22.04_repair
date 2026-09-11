@@ -174,6 +174,93 @@ done
 echo
 ls -ld /opt/ros/* 2>/dev/null
 
+hr "18. ★ /dev 挂载类型 & tty 权限（chmod 666 /dev*/tty* 事故重点）"
+echo "/dev 挂载："
+findmnt -no FSTYPE,SOURCE,OPTIONS /dev 2>/dev/null || grep ' /dev ' /proc/mounts
+DEVFS=$(findmnt -no FSTYPE /dev 2>/dev/null || awk '$2=="/dev"{print $3}' /proc/mounts)
+if [ "$DEVFS" = "devtmpfs" ]; then
+  echo ">>> /dev 是 devtmpfs：重启后内核+udev 会重建设备节点，chmod 本身不会持久。"
+  echo ">>> 若重启后仍进不去桌面，真正原因多半在别处（看第 19/20 节）。"
+else
+  echo ">>> !! /dev 不是 devtmpfs（FSTYPE=${DEVFS:-未知}）：权限改动会持久，必须修回来。"
+fi
+echo
+echo "tty / console 节点数字权限（标准：/dev/tty=666，tty0..63=620，ttyS*/USB=660，console=600）："
+stat -c '%n  %a  %U:%G' /dev/tty /dev/tty[0-9]* /dev/tty[A-Za-z]* /dev/console 2>/dev/null
+echo
+ls -l /dev/tty /dev/tty[0-9]* /dev/tty[A-Za-z]* /dev/console 2>/dev/null
+echo
+echo "!! /dev 下『其他用户可写』的节点（正常只应有 null/zero/tty/ptmx 等少数几个）："
+find /dev -maxdepth 1 \( -type c -o -type b \) -perm -0002 -printf '%m %u:%g %p\n' 2>/dev/null | sort | head -60
+echo
+echo "常见目录权限（正常：/tmp=1777 /var/tmp=1777 /dev/shm=1777 /run/lock=1777 /run=755）："
+stat -c '%n  %a  %U:%G' /tmp /var/tmp /dev/shm /run/lock /run 2>/dev/null
+
+hr "19. systemd 单元状态（failed / masked / enabled）"
+echo "----- 本次启动失败的单元 -----"
+systemctl --failed --no-pager 2>/dev/null
+echo
+echo "----- 被 mask 的单元 -----"
+systemctl list-unit-files --state=masked --no-pager 2>/dev/null | head -30
+echo
+echo "----- 关键单元（state = enabled/disabled/masked，active = active/failed/inactive）-----"
+for u in systemd-logind systemd-journald systemd-journald.socket systemd-udevd dbus dbus.socket \
+         systemd-user-sessions getty@tty1 gdm3 lightdm display-manager rsyslog; do
+  printf '  %-28s %-12s %s\n' "$u" "$(systemctl is-enabled "$u" 2>&1)" "$(systemctl is-active "$u" 2>&1)"
+done
+echo
+echo "----- /etc/systemd/system 下的 drop-in 覆盖文件 -----"
+ls -l /etc/systemd/system/*.d 2>/dev/null
+ls -l /etc/systemd/system/*.service.d/*.conf /etc/systemd/system/*.socket.d/*.conf 2>/dev/null
+echo
+echo "----- logind.conf 非注释行 -----"
+grep -vE '^\s*(#|$)' /etc/systemd/logind.conf 2>/dev/null || echo "(全部注释，默认配置)"
+echo "----- journald.conf 非注释行 -----"
+grep -vE '^\s*(#|$)' /etc/systemd/journald.conf 2>/dev/null || echo "(全部注释，默认配置)"
+
+hr "20. logind / journald / dbus / DM 日志与上一次启动的错误"
+echo "----- systemd-logind -----"
+systemctl status systemd-logind --no-pager -l 2>/dev/null | head -20
+journalctl -b -u systemd-logind --no-pager 2>/dev/null | tail -60
+echo
+echo "----- systemd-journald（即 logging / 日志服务）-----"
+systemctl status systemd-journald --no-pager -l 2>/dev/null | head -20
+journalctl -b -u systemd-journald --no-pager 2>/dev/null | tail -40
+echo
+echo "----- dbus -----"
+journalctl -b -u dbus -u dbus.socket --no-pager 2>/dev/null | tail -30
+echo
+echo "----- 上一次启动的 warning/err（在 Recovery 里跑时，这里才是你真实故障的那次启动）-----"
+journalctl -b -1 -p warning --no-pager 2>/dev/null | tail -100
+echo
+echo "----- /var/log/syslog 尾部 -----"
+tail -60 /var/log/syslog 2>/dev/null
+
+hr "21. journal 目录权限 & 日志完整性"
+stat -c '%n  %a  %U:%G' /var/log/journal /run/log/journal 2>/dev/null
+ls -ld /var/log/journal/* 2>/dev/null | head
+echo
+echo "/var/log 占用:"
+du -sh /var/log 2>/dev/null
+echo
+echo "journal 自检:"
+journalctl --verify --no-pager 2>&1 | tail -5
+
+hr "22. 图标主题 / 会话缓存（图标丢失问题相关）"
+ls -d /usr/share/icons/hicolor /usr/share/icons/Adwaita /usr/share/icons/Yaru 2>/dev/null
+echo
+ls -l /usr/share/icons/hicolor/index.theme 2>/dev/null || echo "!! 缺 /usr/share/icons/hicolor/index.theme —— 图标会大面积丢失"
+echo
+dpkg -l hicolor-icon-theme adwaita-icon-theme yaru-theme-icon 2>/dev/null | awk '/^ii/ {print $1,$2,$3}'
+echo
+which gtk-update-icon-cache 2>/dev/null || echo "!! 缺 gtk-update-icon-cache"
+echo
+for u in $(ls /home); do
+  echo "--- /home/$u 会话缓存 ---"
+  ls -ld /home/"$u"/.cache 2>/dev/null
+  du -sh /home/"$u"/.cache 2>/dev/null
+done
+
 hr "完成"
 echo "诊断报告已写入 $OUT"
 echo "请把它贴出来或 git push 到仓库后让 AI 分析。"

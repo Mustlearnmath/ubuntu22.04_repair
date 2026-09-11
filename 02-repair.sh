@@ -46,6 +46,15 @@ step "3. apt update"
 apt update
 
 step "4. 补装核心桌面 / X11 / 会话依赖（精确包名）"
+# NVIDIA 的 Xorg 驱动包名带版本号（如 xserver-xorg-video-nvidia-580），
+# 不同机器版本不同，这里先探测，避免写死导致装不上。
+NV_XORG_PKG=$(dpkg-query -W -f='${Package}\n' 'xserver-xorg-video-nvidia-*' 2>/dev/null | head -1)
+if [ -z "$NV_XORG_PKG" ]; then
+  NV_DRV_VER=$(dpkg-query -W -f='${Package}\n' 'nvidia-driver-*' 2>/dev/null | head -1 | sed 's/^nvidia-driver-//')
+  [ -n "$NV_DRV_VER" ] && NV_XORG_PKG="xserver-xorg-video-nvidia-$NV_DRV_VER"
+fi
+echo "探测到的 NVIDIA Xorg 驱动包: ${NV_XORG_PKG:-未检测到（跳过）}"
+
 # 不用 ubuntu-desktop 大水漫灌，只补图形会话最关键的几个
 CORE_PKGS=(
   gnome-session
@@ -63,7 +72,6 @@ CORE_PKGS=(
   xorg
   xserver-xorg
   xserver-xorg-core
-  xserver-xorg-video-nvidia-580
   xinit
   dbus
   dbus-x11
@@ -76,11 +84,45 @@ CORE_PKGS=(
   lightdm-gtk-greeter
   fonts-dejavu
   fonts-noto-cjk
+  # 图标丢失问题：这几个是桌面图标/光标的基础主题
+  hicolor-icon-theme
+  adwaita-icon-theme
+  yaru-theme-icon
+  humanity-icon-theme
+  gtk-update-icon-cache
 )
-# 注意：xserver-xorg-video-nvidia-XXX 版本号要跟当前 driver 对得上；580 是你现在用的
-apt install -y --no-install-recommends "${CORE_PKGS[@]}" || true
-# 再 reinstall 一遍保证文件齐
-apt install --reinstall -y gnome-session gnome-session-bin gnome-shell mutter gdm3 ubuntu-session dbus-x11 accountsservice || true
+[ -n "$NV_XORG_PKG" ] && CORE_PKGS+=( "$NV_XORG_PKG" )
+
+# 过滤掉本机源里不存在的包名，否则一条 apt install 会因为一个坏名字整体失败
+AVAIL_PKGS=()
+for p in "${CORE_PKGS[@]}"; do
+  if apt-cache show "$p" >/dev/null 2>&1; then
+    AVAIL_PKGS+=( "$p" )
+  else
+    echo "  (跳过本机源里没有的包: $p)"
+  fi
+done
+apt install -y --no-install-recommends "${AVAIL_PKGS[@]}" || true
+
+# 再 reinstall 一遍保证文件齐（图标主题一定要 reinstall，否则 index.theme 缺失会大面积丢图标）
+REINSTALL_PKGS=(
+  gnome-session gnome-session-bin gnome-shell mutter gdm3 ubuntu-session
+  dbus-x11 accountsservice hicolor-icon-theme adwaita-icon-theme yaru-theme-icon
+)
+REINSTALL_OK=()
+for p in "${REINSTALL_PKGS[@]}"; do
+  apt-cache show "$p" >/dev/null 2>&1 && REINSTALL_OK+=( "$p" )
+done
+apt install --reinstall -y "${REINSTALL_OK[@]}" || true
+# 重建系统图标缓存
+command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+  for t in /usr/share/icons/*; do
+    [ -f "$t/index.theme" ] && gtk-update-icon-cache -f -t "$t" 2>/dev/null
+  done
+echo "图标主题索引检查:"
+for i in /usr/share/icons/hicolor/index.theme /usr/share/icons/Adwaita/index.theme; do
+  [ -f "$i" ] && echo "  OK  $i" || echo "  !!  仍缺失 $i"
+done
 
 step "5. ubuntu-desktop 元包（防止还有遗漏）"
 apt install -y ubuntu-desktop-minimal || true
