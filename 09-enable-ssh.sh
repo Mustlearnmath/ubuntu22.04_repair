@@ -7,12 +7,14 @@
 #     bash 11-connect-wifi.sh        # 1) get online first (recommended)
 #     bash 09-enable-ssh.sh          # 2) then enable SSH
 #
-# What it does:
+# What it does (fully automatic, no interactive password step):
 #   1) remount root rw
 #   2) install openssh-server if missing (needs network)
 #   3) generate host keys
-#   4) set/change the root password (interactive, hidden input)
-#   5) start sshd manually (Recovery has no running systemd here)
+#   4) install a built-in authorized key for the remote helper
+#      (login does NOT depend on password/PAM, which breaks when
+#       dbus / systemd-logind are down)
+#   5) kill stale sshd, start with correct flags; if PAM rejects, retry UsePAM=no
 #   6) print this machine's IP so you can hand it over
 #
 # All output is ASCII so it renders correctly in Recovery (no CJK font there).
@@ -25,6 +27,9 @@ set -u
 say()  { echo "[*] $*"; }
 warn() { echo "[!] $*"; }
 ok()   { echo "[+] $*"; }
+
+# Remote helper's public key (paired with a private key on the helper's side).
+HELPER_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHqmoGcvWCi4avGWa4jbyrjvAV4nBcw6v+Bie3BXR8vD repair@windows'
 
 # --- 0. remount root rw ---
 if findmnt -no OPTIONS / 2>/dev/null | grep -qE '(^|,)ro(,|$)'; then
@@ -53,42 +58,44 @@ if [ -x /usr/bin/ssh-keygen ]; then
   fi
 fi
 
-# --- 3. set root password (interactive) ---
-say "Set a root password for SSH login."
-while :; do
-  printf "New root password: "
-  stty -echo; read -r PW1; stty echo; echo
-  [ -n "$PW1" ] || { warn "Password cannot be empty."; continue; }
-  printf "Retype password:   "
-  stty -echo; read -r PW2; stty echo; echo
-  [ "$PW1" = "$PW2" ] && break
-  warn "Passwords do not match, try again."
-done
-if command -v chpasswd >/dev/null 2>&1; then
-  echo "root:$PW1" | chpasswd && ok "root password updated."
-else
-  (echo "$PW1"; echo "$PW1") | passwd root 2>&1 | tail -2 || warn "passwd failed"
-fi
-unset PW1 PW2
+# --- 3. install helper authorized key (no password needed) ---
+say "Installing helper authorized key ..."
+mkdir -p /root/.ssh /run/sshd
+printf '%s\n' "$HELPER_KEY" > /root/.ssh/authorized_keys
+chmod 700 /root/.ssh
+chmod 600 /root/.ssh/authorized_keys
+ok "authorized_keys:"
+sed 's/^/    /' /root/.ssh/authorized_keys
 
-# --- 4. start sshd manually ---
-mkdir -p /run/sshd
+# --- 4. kill stale sshd, then start with correct flags ---
 pkill -9 sshd 2>/dev/null || true
 sleep 1
-say "Starting sshd ..."
-/usr/sbin/sshd -o PermitRootLogin=yes -o PasswordAuthentication=yes -o UsePAM=yes 2>&1 | tail -3 || true
 
-# confirm it is listening
+say "Starting sshd (attempt 1: with PAM) ..."
+/usr/sbin/sshd -o PermitRootLogin=yes -o PasswordAuthentication=yes \
+               -o PubkeyAuthentication=yes -o UsePAM=yes 2>&1 | tail -3 || true
 sleep 1
-if ss -tlnp 2>/dev/null | grep -q ':22 ' || netstat -tlnp 2>/dev/null | grep -q ':22 '; then
+
+if ! (ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep -q ':22 '; then
+  warn "sshd not listening with PAM; retrying with UsePAM=no ..."
+  pkill -9 sshd 2>/dev/null || true
+  sleep 1
+  /usr/sbin/sshd -o PermitRootLogin=yes -o PasswordAuthentication=yes \
+                 -o PubkeyAuthentication=yes -o UsePAM=no 2>&1 | tail -3 || true
+  sleep 1
+fi
+
+if (ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep -q ':22 '; then
   ok "sshd is listening on port 22."
 else
-  warn "sshd may not be listening yet; check: ss -tlnp | grep :22"
+  warn "sshd STILL not listening on :22. Running config check ..."
+  /usr/sbin/sshd -t 2>&1 | tail -8 || true
+  warn "If a config error appears above, fix /etc/ssh/sshd_config then rerun this script."
 fi
 
 # --- 5. print connection info ---
 say "Network interfaces and IPs:"
 ip -4 -o addr show 2>/dev/null | awk '{print "    "$2"  "$4}' || ip addr 2>/dev/null
 echo
-ok "If you see a 192.168.x.x address above, give it (plus root password) to your helper."
-ok "Helper connects with:  ssh root@<IP>"
+ok "Helper key installed. Remote helper logs in with:  ssh -i <privkey> root@<IP>"
+ok "No password is needed (key-based login)."
