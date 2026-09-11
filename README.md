@@ -551,3 +551,54 @@ sudo usermod -aG plugdev $USER     # 有些设备
 **Q16. 修完还是进不去，我该怎么办？**
 按顺序：`07`（权限+服务）→ `02`（桌面依赖，需联网）→ `03`（XFCE 兜底）→ 收集证据（`01` + `journalctl -b -1 -p err`）带回来分析。**不要在没证据的情况下重装系统**，你的 conda / ROS / Isaac Sim 都还在。
 
+**Q17. 我之前已经 clone 过这个仓库了，再跑一次 `git clone` 会更新吗？**
+**不会。** 目标目录已存在时 git 会直接失败：
+
+```
+fatal: destination path 'ubuntu22.04_repair' already exists and is not an empty directory.
+```
+
+三选一：
+
+**方案 A · 更新现有副本（推荐，最省流量）**
+```bash
+cd /root/ubuntu22.04_repair
+git log --oneline -1                  # 先看自己现在是哪个版本
+git fetch origin
+git reset --hard origin/main          # 对齐远程最新（注意：丢弃本地未提交改动！）
+chmod +x *.sh
+ls -l 00-run-all.sh 07-fix-tty-and-login.sh    # 确认两个新脚本已到
+bash 00-run-all.sh
+```
+
+**方案 B · 删掉重拉（最干净）**
+```bash
+cd /root
+rm -rf ubuntu22.04_repair
+git clone https://github.com/Mustlearnmath/ubuntu22.04_repair.git
+cd ubuntu22.04_repair && bash 00-run-all.sh
+```
+
+**方案 C · 另拉一个新目录，不动旧的**
+```bash
+cd /root
+git clone https://github.com/Mustlearnmath/ubuntu22.04_repair.git repair-new
+cd repair-new && bash 00-run-all.sh
+```
+
+> ⚠️ 用方案 A 的 `git reset --hard` 之前，如果旧副本里存过你自己的日志（例如 `logs/diagnosis.txt`），先备份：`cp -r logs /root/old-logs`。
+> 想"更新但保留本地改动"就用：`git stash && git pull --rebase && git stash pop`。
+> 如果旧目录根本不是 git 仓库（当初下载的是 zip 包），`git fetch` 会报 `not a git repository` → 直接用**方案 B**。
+
+**怎么确认拿到的是最新版**：`git log --oneline -1` 应显示 `36af906 docs: README 大幅扩写 …`（或更新），并且 `00-run-all.sh`、`07-fix-tty-and-login.sh` **两个文件必须存在**。
+
+**Q18. 我完全不想用 git / clone 老是失败怎么办？**
+在能上网的电脑上打开
+`https://github.com/Mustlearnmath/ubuntu22.04_repair` → 绿色 **Code → Download ZIP** → 把 zip 拷到 U 盘 → 在 Ubuntu 里解压到 `/root`，然后：
+```bash
+cd /root/ubuntu22.04_repair-main
+chmod +x *.sh
+bash 00-run-all.sh
+```
+（zip 方式拿不到 git 历史，但脚本功能完全一样。）
+
