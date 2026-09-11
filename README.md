@@ -24,7 +24,7 @@ ping -c 2 github.com                       # ② 确认真的联网了
 
 cd /root/ubuntu22.04_repair                # ③ 进旧副本（cd 失败就先 ls /root 看目录名）
 git fetch origin && git reset --hard origin/main
-git log --oneline -1                       # 期望看到 a4adc73（或更新）
+git log --oneline -1                       # 期望看到 a6a3a9a（本仓库最新；更新即可）
 chmod +x *.sh
 ls -l 00-run-all.sh 07-fix-tty-and-login.sh   # 这两个文件必须出现
 
