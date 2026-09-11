@@ -8,6 +8,42 @@ Ubuntu 22.04 + NVIDIA RTX 5070 Ti + CUDA 13 + ROS Humble + Isaac Sim 图形会�
 
 ---
 
+## ⚡ 三步速查（马上要关机换系统？只看这一段就够）
+
+> 这份 README 可以在故障机的 root shell 里直接看（不用浏览器）：
+> `cd /root/ubuntu22.04_repair && less README.md`　（`q` 退出，`/` 搜索，空格翻页）
+
+**第 1 步 · 进 GRUB**
+开机时**连按 `Esc`**（UEFI）或**长按 `Shift`**（老 BIOS）→ 选 `Advanced options for Ubuntu` → 选带 **`(recovery mode)`** 的 **6.8** 内核。
+
+**第 2 步 · 进 root shell**
+在 **Recovery Menu**（蓝底）里：
+先选 `network`（**Enable networking**，回车，等它显示 Finished 再回车）→ 再选 `root`（**Drop to root shell prompt**）→ 出现 `root@主机名:~#`。
+
+**第 3 步 · 粘贴这几行**
+
+```bash
+mount -o remount,rw /      # 根分区默认只读，必须做
+ping -c 2 github.com       # 确认网络通
+cd /root
+git clone https://github.com/Mustlearnmath/ubuntu22.04_repair.git
+cd ubuntu22.04_repair
+bash 00-run-all.sh         # 一键：诊断 + 修 /dev/tty* + 修登录/日志服务 + 修内核 + 修桌面
+reboot
+```
+
+> 如果 `git clone` 报 `destination path already exists`（以前克隆过），改成：
+> ```bash
+> cd /root/ubuntu22.04_repair && git fetch origin && git reset --hard origin/main
+> ```
+
+**预期结果**：重启后出现登录界面 → 能进桌面、图标回来。
+若没有 → 跑 `bash 03-fallback-xfce.sh` 再 `reboot`；还不行 → 按文末「📤 把证据带回来」操作。
+
+**时间预算**（全程**不要断电**）：诊断 1~3 分钟；修 `/dev` 权限与登录服务 10 秒；固定内核 20 秒；补桌面依赖 3~15 分钟（看网速）。
+
+---
+
 ## 🚑 事故 2：`sudo chmod 666 /dev*/tty*` 怎么修
 
 ### 这条命令到底改了什么
@@ -99,6 +135,42 @@ bash 00-run-all.sh
 - **TTY**：如果系统其实起来了、只是图形界面没出来，按 `Ctrl+Alt+F3` 切到文本终端，用你的账号登录，然后 `sudo bash 00-run-all.sh`。
 - **`init=/bin/bash`**（应急，root 密码也丢了时）：GRUB 菜单里选中正常启动项按 `e` 编辑，在 `linux` 那行末尾加 `rw init=/bin/bash`，`Ctrl+X` 启动。此时 /dev 权限可以修，但**没有网络**，只能做第 2 步 tty 权限修正。
 - **U 盘 Live 系统**：最后手段，需要手动 `chroot` 到硬盘系统再跑脚本。
+
+### 逐屏对照（你会看到什么 / 没出现怎么办）
+
+| 步骤 | 正常应该看到 | 没出现怎么办 |
+|------|--------------|--------------|
+| 1 开机按 `Esc`/`Shift` | 黑底/紫底 GRUB 菜单，含 `Ubuntu`、`Advanced options for Ubuntu` | 连按 `Esc` 不行就按住 `Shift`；仍不行见 FAQ Q1；实在不行用 `Ctrl+Alt+F3` 进 TTY |
+| 2 进 recovery 内核 | 一堆内核启动信息后出现**蓝底 Recovery Menu** | 若卡住，改用同菜单里另一个 6.8 内核 |
+| 3 选 `network` | 打印获取 DHCP 的信息，最后 `Finished, please press ENTER` | 若无网络信息 → 见下方"Recovery 里没网" |
+| 4 选 `root` | `root@主机名:~#` 提示符 | 若问密码：输入你设过的 root 密码（没设过通常直接进） |
+| 5 `mount -o remount,rw /` | **没有任何输出**（无输出就是成功） | 报错就照抄提示；`mount \| grep ' / '` 看是不是已经 `rw` |
+| 6 `ping -c 2 github.com` | `2 packets transmitted, 2 received` | 见下方"Recovery 里没网" |
+| 7 `git clone ...` | `Cloning into 'ubuntu22.04_repair'...` 然后完成 | 慢/超时可重试；目录已存在就 `git fetch origin && git reset --hard origin/main` |
+| 8 `bash 00-run-all.sh` | 先刷一大屏诊断内容（**正常，不要以为卡了**），最后打印"完成 + 现在执行 reboot" | 某步报错也会继续跑完并留日志，把日志带回来 |
+| 9 `reboot` | 重启，GRUB 里选第一项 `Ubuntu` 或等 5 秒自动进 | 直接黑屏/卡 Logo → 见「症状对照表」 |
+
+### Recovery 里没网怎么办（按顺序试）
+
+```bash
+ip -br a                     # 看网卡名，例如 enp3s0 / wlp2s0
+ip link set enp3s0 up        # 换成你的网卡名
+dhclient -v enp3s0           # 手动取 IP
+cat /etc/resolv.conf         # 如果这个文件是空的/没有 nameserver：
+echo 'nameserver 223.5.5.5' >> /etc/resolv.conf
+ping -c 2 github.com
+```
+
+> 有线网最稳；笔记本如果只连 Wi-Fi，Recovery 里只能用 `wpa_supplicant`（较麻烦），建议直接插网线。
+> 若确实无法联网：先跑不需要网络的部分 `bash 00-run-all.sh --no-desktop`（能修 `/dev` 权限、登录服务和内核默认项），**进桌面后再**跑 `sudo bash 02-repair.sh` 补包。
+
+### 别忘了这几条（血泪教训）
+
+- ❌ **不要在 root shell 里跑 `apt autoremove` / `apt remove`** —— 上次"启动会话失败"就是被它误删了桌面依赖。
+- ❌ **不要把内核固定回 5.15** —— RTX 5070 Ti 需要 6.8 + 驱动 580+。
+- ❌ 不要 `chmod -R` / `chown -R` 去动 `/dev`、`/home`、`/usr`。
+- ✅ 不确定就先只跑 `bash 00-run-all.sh --diagnose-only`，把 `/root/diagnosis.txt` 带回来再决定。
+- ✅ 真要动大手术前先备份：`bash 99-backup-home.sh /mnt/usb`（把 U 盘挂到 /mnt/usb）。
 
 ---
 
@@ -264,6 +336,137 @@ reboot
 
 ---
 
+## 📖 每个脚本到底做了什么（详细）
+
+> 所有脚本都要求 **root**；都用 `tee` 写日志到 `/root/*.log`，出问题就把日志带回来。
+
+### `00-run-all.sh` — 一键入口（推荐）
+- **联网**：部分需要（第 4 步）
+- **耗时**：5~20 分钟（大头是补包）
+- **流程**：`0` 环境自检 + 自动 `remount rw` + 网络检测 → `1` 诊断 → `2` 修 `/dev/tty*` 与登录/日志栈 → `3` 固定 6.8 内核 → `4` 补桌面依赖/图标主题
+- **参数**：`--no-desktop`（跳过第 4 步，离线可用）、`--diagnose-only`（只做诊断）
+- **产物**：`/root/diagnosis.txt` + 各步自己的 `/root/*.log`
+
+### `01-diagnose.sh` — 只读取证
+- **联网**：不需要　**改系统**：不改
+- **产物**：`/root/diagnosis.txt`（23 节）
+- **本次事故重点看**：
+  - 第 **18** 节：`/dev` 挂载类型（是 devtmpfs 吗）+ `tty` 权限 + 谁被改成"其他用户可写"
+  - 第 **19** 节：failed / masked 单元、关键单元 enabled/active 状态、drop-in 覆盖文件、`logind.conf` 异常行
+  - 第 **20** 节：`systemd-logind` / `journald` / `dbus` 日志 + **上一次启动（`-b -1`）的错误**
+  - 第 **21** 节：journal 目录权限 + 日志完整性
+  - 第 **22** 节：图标主题（hicolor / Adwaita / Yaru）+ 会话缓存
+- **怎么看**：`less /root/diagnosis.txt`，输入 `/^18.` 直接跳到第 18 节
+
+### `07-fix-tty-and-login.sh` — 本次事故的主角
+- **联网**：不需要（加 `--with-desktop` 才需要）
+- **耗时**：约 10 秒
+- **做的事**：
+  1. 快照 `/dev` 现状，判断是否 devtmpfs（决定这次 chmod 会不会持久）
+  2. 恢复权限：`/dev/tty`→`666`、`/dev/tty0..63`→`620 root:tty`、`/dev/ttyS*/USB*/ACM*`→`660`；顺带校回 `/dev/console`、`/tmp`、`/var/tmp`、`/dev/shm`、`/run/lock`；再让 `udevadm trigger` 用系统规则重刷一遍
+  3. 修登录/日志栈：`systemd-logind`、`systemd-journald`、`dbus`、`systemd-udevd`、`systemd-user-sessions`、`getty@tty1` —— **解除 mask、恢复 enable、`reset-failed`、现场 `start` 看真实报错**、清理可疑 drop-in
+  4. 修 journal 目录权限（`root:systemd-journal` + `2755`，journal 文件 `0640`）
+  5. 检查图标主题，缺了会告诉你装什么
+  6. 检查 `default-display-manager` / `graphical.target` 并 `enable` 对应 DM
+- **产物**：`/root/fix-tty-login-<时间戳>.log`
+- **副作用**：只改设备节点模式 + systemd 单元状态；**不装包、不删数据**
+- **重点看**：日志里"仍然失败的单元"和 `systemd-logind` 的报错 —— 那就是没修好的根因
+
+### `05-fix-kernel-grub.sh` — 固定内核
+- **联网**：不需要（但若某个 6.8 内核没装 headers，它会尝试 apt）
+- **做的事**：遍历已装内核 → 找出 **DKMS 已编译出 nvidia 模块** 的最新 6.8 → 写进 `/etc/default/grub` 的 `GRUB_DEFAULT`（用 `submenu>entry` 写法）→ `update-grub`；同时设 `GRUB_SAVEDEFAULT=false`、`GRUB_TIMEOUT=5`、`TIMEOUT_STYLE=menu`（**以后开机容易进 GRUB 菜单**）
+- **备份**：`/etc/default/grub.bak.<时间戳>`
+
+### `02-repair.sh` — 桌面依赖大修（**需要联网**）
+- **耗时**：3~15 分钟
+- **做的事**：`dpkg --configure -a` → 补装 GNOME 会话/X11/GDM/D-Bus/字体 + **图标主题**（hicolor/Adwaita/Yaru/Humanity）并重建 `gtk-update-icon-cache` → `ubuntu-desktop-minimal` → 清 fcitx/搜狗钩子 → **禁 GDM Wayland（强制 X11）** → 校验 `xsessions` 会话文件 → 重建 NVIDIA DKMS → 清 AccountsService 与用户会话缓存 → 设 GDM3 为默认 DM → `graphical.target`
+- **备份**：`/root/repair-backup-<时间戳>/`（grub、gdm3、lightdm、X11/Xsession.d、AccountsService 用户配置）
+- **产物**：`/root/repair-<时间戳>.log`
+- **注意**：包名不存在会自动跳过（不会因一个坏名字整体失败）
+
+### `03-fallback-xfce.sh` — 兜底（GNOME 修不好时）
+- 装 XFCE4 + LightDM 并把默认会话设为 xfce。**conda / ROS / Isaac Sim / CUDA 都不受影响**，进桌面后照常用。
+
+### `04-list-missing-ros.sh` — 恢复 ROS 包清单
+只读。扫 `/var/log/apt/history.log*` 里被 Remove/Purge 的 `ros-humble-*`，生成 `/root/reinstall-ros.sh`（**进桌面后**用 `sudo bash` 跑它）。
+
+### `06-check-cuda-torch-isaacsim.sh` — 环境体检
+只读。核对 `nvidia-smi` / CUDA / cuDNN / conda 环境里的 torch（含 `cuda.is_available()`）/ Isaac Sim / `/opt/ros/humble`。产物 `/root/env-check.txt`。
+
+### `99-backup-home.sh` — 大手术前备份
+`bash 99-backup-home.sh /mnt/usb`（先把 U 盘挂到 `/mnt/usb`）。备份 `/home`（排除 `.cache`/Trash/Downloads）、`/root`、`/etc`、dpkg 包清单、apt 日志、NVIDIA/CUDA 清单。
+
+---
+
+## ✅ 修好后怎么验证（重启进桌面后跑）
+
+```bash
+systemctl --failed                        # 期望：0 loaded units listed（没有红色 failed）
+systemctl is-active systemd-logind systemd-journald dbus gdm3   # 期望全是 active
+ls -l /dev/tty0 /dev/tty /dev/ttyS0       # 期望 620 root tty / 666 root tty / 660
+ls /usr/share/icons/hicolor/index.theme   # 期望存在（图标丢失问题的直接指标）
+nvidia-smi                                # 期望能列出 RTX 5070 Ti 和驱动 580+
+cat /etc/X11/default-display-manager      # 期望 /usr/sbin/gdm3（或 lightdm）
+nproc; free -h; df -h /                   # 顺带看下没爆盘（/ 满了也会起不来桌面）
+```
+
+想确认 `/dev` 权限是否"自愈"过：
+
+```bash
+findmnt -no FSTYPE /dev                   # 期望 devtmpfs
+```
+
+---
+
+## 🧭 症状 → 该跑哪个脚本（决策树）
+
+| 你看到的症状 | 最可能原因 | 跑什么 |
+|---|---|---|
+| 进不去登录界面 / 卡 Ubuntu Logo / 黑屏只有光标 | GDM 卡 Wayland、NVIDIA 驱动、内核不对 | `07` → `05` → `02`（即 `00-run-all.sh`） |
+| 登录界面出现，输密码后**闪回登录界面** | 会话文件/dconf/AccountsService 缓存 | `02` |
+| 提示 **"启动会话失败"** / 新建用户也进不去 | 桌面依赖被 `apt autoremove` 误删 | `02`（还不行 → `03`） |
+| **日志服务 / 登录服务 failed**（本次事故） | `/dev/tty*` 权限被改坏、logind/journald 状态异常 | `07` |
+| **桌面图标大量丢失** | 图标主题（hicolor/Adwaita/Yaru）损坏 | `07`（只看检查结果）+ `02`（修） |
+| 串口 / Arduino / USB 转串口不认 | `ttyS*` `ttyUSB*` 权限被打乱 | `07` |
+| 一个用户进不去、新建用户能进去 | 用户级配置问题 | `02`（清会话缓存那步） |
+| 所有用户都进不去 | 系统级依赖/服务问题 | `02` → `03` |
+| 进桌面后 ROS 包报缺失 | apt autoremove 误删 ROS | `04`，然后进桌面 `sudo bash /root/reinstall-ros.sh` |
+| 怀疑显卡/CUDA/torch/Isaac 坏了 | 驱动或环境问题 | `06`（只读体检） |
+
+---
+
+## 📤 把证据带回来（给我，或给未来的你）
+
+**A. 先在本机看**
+```bash
+less /root/diagnosis.txt                 # 23 节完整证据
+ls -l /dev/tty* /dev/console             # 重启后的真实权限
+journalctl -b -1 -p err --no-pager | tail -80   # 故障那次的错误
+journalctl -b -u systemd-logind -u systemd-journald --no-pager | tail -60
+systemctl --failed --no-pager
+```
+
+**B. 拷到 U 盘**（最省事，不需要网络）
+```bash
+lsblk                       # 找到 U 盘，例如 sdb1
+mkdir -p /mnt/usb
+mount /dev/sdb1 /mnt/usb
+cp /root/diagnosis.txt /root/*.log /mnt/usb/
+sync && umount /mnt/usb
+```
+
+**C. 推回 GitHub**（需要 PAT，见下文「🔄 root 模式下的 git 上推 / 下拉」）
+```bash
+cd /root/ubuntu22.04_repair
+mkdir -p logs && cp /root/diagnosis.txt /root/*.log logs/
+git add -A && git commit -m "recovery: 现场日志"
+git push
+```
+
+**D. 只看关键几行也行**：把 `diagnosis.txt` 第 18~22 节、`systemctl --failed` 的输出、`journalctl -b -1 -p err` 的尾部拍照/抄下来即可。
+
+---
+
 ## ❓ FAQ / 排障
 
 **Q1. 开机怎么按都进不去 GRUB 菜单？**
@@ -321,4 +524,30 @@ nvidia-smi                    # 显卡正常
 
 **Q9. 怎么把现场日志推回仓库给我看？**
 见上面「🔄 root 模式下的 git 上推 / 下拉」，用 PAT 推 `diagnosis.txt` / `repair-*.log` 即可。
+
+**Q10. Recovery 模式里能直接进图形界面吗？**
+不能。Recovery 只有文本 root shell，图形界面必须重启后**正常启动**才会出现。Recovery 的用途是"改东西 → reboot 验证"。
+
+**Q11. 脚本跑到一半断了（断网/手滑 Ctrl+C），能重跑吗？**
+能，全部脚本都是**幂等**的：修权限只改不对的值、装包会跳过已装的、GRUB 先备份再写、systemd 操作可重复。直接重跑 `bash 00-run-all.sh` 即可。
+
+**Q12. `apt update` 很慢或 404？**
+Recovery 里默认源可能慢。先确认网络（`ping archive.ubuntu.com`）。要换国内镜像可在**进桌面后**再改 `/etc/apt/sources.list`（备份原文件），别在恢复模式里手抖改源。
+
+**Q13. 我担心动 GRUB 会影响 Windows 双系统启动项？**
+不会。`05-fix-kernel-grub.sh` 只改 `/etc/default/grub` 里的 `GRUB_DEFAULT`（把默认项指向某个 6.8 内核），不删任何 menuentry、不动其他系统的引导。而且它先备份成 `/etc/default/grub.bak.<时间戳>`，随时可以改回来：`sudo cp /etc/default/grub.bak.* /etc/default/grub && sudo update-grub`。
+
+**Q14. 忘记 root 密码 / Recovery 选 `root` 时要密码？**
+Recovery 的 root shell 一般不需要密码。如果它真的要，而你又忘了，用 `init=/bin/bash` 应急入口（见上文「备选入口」）；或进桌面后用 `sudo passwd root` 重新设置。
+
+**Q15. 以后怎么避免再次踩坑？**
+`/dev` 里**千万别用 `chmod -R`**。给串口/USB 设备授权用：
+```bash
+sudo usermod -aG dialout $USER     # 串口（重新登录生效）
+sudo usermod -aG plugdev $USER     # 有些设备
+```
+而不是 `chmod 666 /dev/ttyUSB0`（临时且危险）。
+
+**Q16. 修完还是进不去，我该怎么办？**
+按顺序：`07`（权限+服务）→ `02`（桌面依赖，需联网）→ `03`（XFCE 兜底）→ 收集证据（`01` + `journalctl -b -1 -p err`）带回来分析。**不要在没证据的情况下重装系统**，你的 conda / ROS / Isaac Sim 都还在。
 
